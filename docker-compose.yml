@@ -1,0 +1,87 @@
+version: '3.8'
+
+# ASM Platform - Hybrid Container Architecture (v1.0)
+# - Scanner: Host Network (고속 스캐닝 및 사내망 패킷 유실 방지)
+# - Platform: Bridge Network (내부 격리 및 보안)
+
+services:
+  # ==========================================
+  # 1. Scanner Node (Phase 1 & 2)
+  # ==========================================
+  scanner-node:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.scanner
+    container_name: asm_scanner
+    # [핵심] 스캐너는 호스트(Ubuntu)의 물리 네트워크 인터페이스를 직접 사용하여 패킷을 전송함
+    network_mode: "host"
+    environment:
+      # 호스트 네트워크를 쓰기 때문에, DB 접근 시 localhost가 호스트를 의미함
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - REDIS_URL=${REDIS_URL}
+    volumes:
+      # 로컬 머신의 ./data/outputs 디렉토리와 컨테이너 결과물 동기화
+      - ./data/outputs:/app/outputs:rw
+    # 데몬 형태로 계속 띄워두고, 주기적으로 Celery/Cron이 스캔 명령을 내리도록 함
+    command: tail -f /dev/null
+
+  # ==========================================
+  # 2. ASM Database (Phase 3)
+  # ==========================================
+  db:
+    image: postgres:15.6-alpine
+    container_name: asm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      # 127.0.0.1 바인딩으로 외부 접근 차단 (Ubuntu 호스트 및 Host Net 컨테이너만 접근 가능)
+      - "127.0.0.1:${HOST_DB_PORT}:5432"
+    volumes:
+      - asm_pgdata:/var/lib/postgresql/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================
+  # 3. Message Queue & Cache (Phase 3/4)
+  # ==========================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: asm_redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HOST_REDIS_PORT}:6379"
+    volumes:
+      - asm_redis_data:/data
+
+  # ==========================================
+  # 4. Platform API & Admin Dashboard (Phase 4 예정)
+  # ==========================================
+  # platform-api:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.api
+  #   container_name: asm_platform
+  #   restart: unless-stopped
+  #   environment:
+  #     - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+  #   ports:
+  #     - "127.0.0.1:${API_PORT}:8000"
+  #   depends_on:
+  #     - db
+  #     - redis
+
+volumes:
+  asm_pgdata:
+  asm_redis_data:

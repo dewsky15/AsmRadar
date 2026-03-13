@@ -1,0 +1,25 @@
+[project]
+name = "asm-platform"
+version = "0.1.0"
+description = "Automated Attack Surface Management Platform"
+authors = [{name = "SecTeam", email = "sec@dev.null"}]
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "asyncpg>=0.29",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "celery>=5.3",
+    "redis>=5.0",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0"
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B"]
+ignore = []
