@@ -1,24 +1,52 @@
 import os
 import subprocess
+import argparse
+import sys
+import logging
 from pathlib import Path
+
+# 모듈 경로 추가
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+
+from app.pipeline.asset_parser import parse_httpx_results
+from app.pipeline.vuln_parser import parse_nuclei_results
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # 출력물 저장을 위한 디렉토리 보장
 OUTPUT_DIR = Path("/app/outputs/internal")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+def run_command(cmd, shell=False):
+    """서브프로세스를 실행하고 리턴 코드를 체크합니다."""
+    try:
+        # masscan 등은 root 권한이나 특수 권한이 필요하므로 stderr를 잘 봐야 함
+        result = subprocess.run(cmd, shell=shell, check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"[-] Command failed: {e.cmd}")
+        logger.error(f"[-] Error output: {e.stderr}")
+        return False
+
 def run_masscan(cidr: str, prefix: str) -> str:
     """초고속 대역 스캔을 수행하여 활성화된 호스트와 주요 포트를 식별합니다."""
-    print(f"[*] Running Masscan for {cidr}...")
+    logger.info(f"[*] Running Masscan for {cidr}...")
     out_file = OUTPUT_DIR / f"{prefix}_masscan.txt"
-    # rate 1000 패킷/sec 제한, 주요 포트 타겟팅
     cmd = [
         "masscan", cidr,
         "-p21,22,23,80,443,445,3389,8080,8443",
         "--rate", "1000",
         "-oG", str(out_file)
     ]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def parse_masscan_ips(masscan_file: str, prefix: str) -> str:
     """Masscan Grepable 포맷에서 IP 주소만 유니크하게 추출합니다."""
@@ -39,56 +67,86 @@ def parse_masscan_ips(masscan_file: str, prefix: str) -> str:
 
 def run_nmap_deep_scan(ip_list_file: str, prefix: str) -> str:
     """살아있는 내부 IP에 대해 정밀 서비스/OS 배너 그랩을 수행합니다."""
-    print("[*] Running Nmap Deep Scan...")
+    logger.info("[*] Running Nmap Deep Scan...")
     out_file = OUTPUT_DIR / f"{prefix}_nmap.xml"
-    # -iL : 리스트 읽기, -sV : 서비스 버전, -O : OS 탐지, -T3 : 일반적 속도
     cmd = [
         "nmap", "-iL", ip_list_file,
         "-sV", "-O", "-T3",
         "-oX", str(out_file)
     ]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_internal_httpx(ip_list_file: str, prefix: str) -> str:
     """내부망 내에 동작 중인 웹 관리자 페이지 등을 스니핑합니다."""
-    print("[*] Running httpx for internal web discovery...")
+    logger.info("[*] Running httpx for internal web discovery...")
     out_file = OUTPUT_DIR / f"{prefix}_httpx.json"
     cmd = ["httpx", "-l", ip_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-json", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_internal_nuclei(httpx_out_file: str, prefix: str) -> str:
     """내부 프라이빗망용 취약점 스캔 (Default Password, RCE 등 위주)"""
-    print("[*] Running Nuclei for internal assets...")
+    logger.info("[*] Running Nuclei for internal assets...")
     out_file = OUTPUT_DIR / f"{prefix}_vulns.json"
-    
-    # httpx JSON에서 URL 추출을 위한 편의성 커맨드 (jq가 없으므로 awk/sed 쓰거나 파이썬 자체 파싱 권장)
     target_urls = OUTPUT_DIR / f"{prefix}_target_urls.txt"
-    subprocess.run(f"cat {httpx_out_file} | grep '\"url\"' | awk -F'\"url\":\"' '{{print $2}}' | awk -F'\"' '{{print $1}}' > {target_urls}", shell=True)
+    
+    # httpx JSON에서 URL 추출
+    try:
+        import json
+        with open(httpx_out_file, 'r') as f_in, open(target_urls, 'w') as f_out:
+            for line in f_in:
+                if not line.strip(): continue
+                try:
+                    data = json.loads(line)
+                    if 'url' in data:
+                        f_out.write(data['url'] + '\n')
+                except Exception: pass
+    except Exception as e:
+        logger.error(f"[-] Failed to prepare targets for internal nuclei: {e}")
+        return ""
 
     cmd = ["nuclei", "-l", str(target_urls), "-tags", "default-login,rce,misconfig,iot", "-silent", "-jsonl", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_internal_pipeline(cidr: str, target_name: str="internal_corp"):
     """내부망 CIDR 대역에 대한 파이프라인 스캔을 통제합니다."""
-    print(f"=== Starting Internal ASM Pipeline for {cidr} ===")
+    logger.info(f"=== Starting Internal ASM Pipeline for {cidr} ===")
     
     masscan_res = run_masscan(cidr, target_name)
+    if not masscan_res:
+        logger.warning("[-] Masscan failed. Host discovery aborted.")
+        return
+
     ip_list = parse_masscan_ips(masscan_res, target_name)
-    
     if not os.path.exists(ip_list) or os.path.getsize(ip_list) == 0:
-        print("[-] 활성화된 내부 IP를 찾을 수 없습니다. 파이프라인 종료.")
+        logger.warning("[-] No active internal IPs found. Pipeline terminated.")
         return
         
+    # Nmap 정밀 스캔 실행 (결과는 현재 XML 파일로 보관)
     run_nmap_deep_scan(ip_list, target_name)
     
-    # 포트스캔과 별개로, 내부망의 웹 서비스 프로파일링도 IP 기반으로 던짐(httpx가 80/443 알아서 체크)
+    # 웹 서비스 탐지
     httpx_res = run_internal_httpx(ip_list, target_name)
-    vuln_res = run_internal_nuclei(httpx_res, target_name)
-    print(f"=== Pipeline Completed. Vulnerabilities saved to {vuln_res} ===")
+    if httpx_res:
+        # [자동화] 자산 DB 적재 (내부망 플래그 활성화)
+        parse_httpx_results(httpx_res, target_name, is_internal=True)
+        
+        # 취약점 스캔
+        vuln_res = run_internal_nuclei(httpx_res, target_name)
+        if vuln_res:
+            # [자동화] 취약점 DB 적재
+            parse_nuclei_results(vuln_res)
+            logger.info(f"=== Pipeline Completed for {cidr} ===")
 
 if __name__ == "__main__":
-    # Test Run (Local Docker Bridge 등 아주 작은 대역만 타겟팅)
-    run_internal_pipeline("172.17.0.0/24")
+    parser = argparse.ArgumentParser(description="Internal ASM Scanner Engine")
+    parser.add_argument("target", help="Target CIDR (e.g., 192.168.1.0/24)")
+    parser.add_argument("--name", default="internal_scan", help="Scan job name for output files")
+    args = parser.parse_args()
+    
+    run_internal_pipeline(args.target, args.name)
