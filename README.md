@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Docker](https://img.shields.io/badge/docker-ready-green)
 
-여러 보안 도구를 컨테이너 기반의 파이프라인으로 통합하여, 외부 및 내부 네트워크 자산을 자동으로 발견, 열거하고 취약점을 식별하도록 설계된 종합적인 공격 표면 관리(ASM) 플랫폼입니다.
+본 프로젝트는 **AI Agent와 협업하여 제작된** 컨테이너 기반의 자동화 파이프라인입니다. 기업의 인터넷 노출 자산과 내부망 자산을 지능적으로 식별하고 관리하는 Attack Surface Management(ASM) 인프라를 구축합니다.
 
 ## 🚀 주요 기능 및 아키텍처 (Phases)
 

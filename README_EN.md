@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Docker](https://img.shields.io/badge/docker-ready-green)
 
-A comprehensive, automated Attack Surface Management (ASM) platform designed to discover, enumerate, and identify vulnerabilities across both external and internal network assets using a multi-tool containerized pipeline.
+This project is a containerized ASM pipeline **developed in collaboration with an AI Agent**. It leverages intelligent automation to discover and manage attack surfaces across hybrid network environments.
 
 ## 🚀 Key Features & Architecture (Phases)
 
