@@ -1,89 +1,121 @@
 import json
 import os
 import subprocess
+import argparse
+import sys
+import logging
 from pathlib import Path
+
+# 모듈 경로 추가 (부모 디렉토리의 app 패키지 참조를 위해)
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+
+from app.pipeline.asset_parser import parse_httpx_results
+from app.pipeline.vuln_parser import parse_nuclei_results
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # 출력물 저장을 위한 디렉토리 보장
 OUTPUT_DIR = Path("/app/outputs/external")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+def run_command(cmd, shell=False):
+    """서브프로세스를 실행하고 리턴 코드를 체크합니다."""
+    try:
+        result = subprocess.run(cmd, shell=shell, check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"[-] Command failed: {e.cmd}")
+        logger.error(f"[-] Error output: {e.stderr}")
+        return False
+
 def run_subfinder(domain: str) -> str:
     """도메인을 받아 서브도메인을 탐지합니다."""
-    print(f"[*] Running Subfinder for {domain}...")
+    logger.info(f"[*] Running Subfinder for {domain}...")
     out_file = OUTPUT_DIR / f"{domain}_subdomains.txt"
-    # -silent: 배너 숨김
     cmd = ["subfinder", "-d", domain, "-silent", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_dnsx(subdomains_file: str, domain: str) -> str:
     """서브도메인의 살아있는 IP를 해석합니다."""
-    print("[*] Running dnsx for DNS resolution...")
+    logger.info("[*] Running dnsx for DNS resolution...")
     out_file = OUTPUT_DIR / f"{domain}_dnsx.json"
-    # JSON 형태로 결과 출력 (-j)
     cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -o {out_file}"
-    subprocess.run(cmd, shell=True, check=False)
-    return str(out_file)
+    if run_command(cmd, shell=True):
+        return str(out_file)
+    return ""
 
 def run_naabu(ip_list_file: str, domain: str) -> str:
     """IP 리스트 기반 포트 스캐닝을 수행합니다."""
-    print("[*] Running Naabu for port scanning...")
+    logger.info("[*] Running Naabu for port scanning...")
     out_file = OUTPUT_DIR / f"{domain}_ports.json"
-    # top 100 ports example
     cmd = ["naabu", "-l", ip_list_file, "-top-ports", "100", "-silent", "-json", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_httpx(port_list_file: str, domain: str) -> str:
     """열린 포트에 대해 웹 서비스를 프로파일링 합니다."""
-    print("[*] Running httpx for web profiling...")
+    logger.info("[*] Running httpx for web profiling...")
     out_file = OUTPUT_DIR / f"{domain}_httpx.json"
     cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-json", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_nuclei_external(httpx_out_file: str, domain: str) -> str:
     """발견된 웹 자산에 대해 고위험군 취약점 스캔을 수행합니다."""
-    print("[*] Running Nuclei for vulnerability scanning...")
+    logger.info("[*] Running Nuclei for vulnerability scanning...")
     out_file = OUTPUT_DIR / f"{domain}_vulns.json"
-    # 추출된 URL 목록을 바탕으로 파싱 스캔. (ex. cve, exposed-panels, default-login)
     target_urls = OUTPUT_DIR / f"{domain}_target_urls.txt"
     
-    # httpx JSON에서 URL만 추출하여 임시 파일에 저장
-    with open(httpx_out_file, 'r') as f_in, open(target_urls, 'w') as f_out:
-        for line in f_in:
-            if not line.strip(): continue
-            try:
-                data = json.loads(line)
-                if 'url' in data:
-                    f_out.write(data['url'] + '\n')
-            except Exception:
-                pass
+    try:
+        with open(httpx_out_file, 'r') as f_in, open(target_urls, 'w') as f_out:
+            for line in f_in:
+                if not line.strip(): continue
+                try:
+                    data = json.loads(line)
+                    if 'url' in data:
+                        f_out.write(data['url'] + '\n')
+                except Exception:
+                    pass
+    except FileNotFoundError:
+        logger.error(f"[-] HTTPX output not found for nuclei: {httpx_out_file}")
+        return ""
 
     cmd = ["nuclei", "-l", str(target_urls), "-tags", "cve,exposed-panel,default-login", "-severity", "critical,high", "-silent", "-jsonl", "-o", str(out_file)]
-    subprocess.run(cmd, check=False)
-    return str(out_file)
+    if run_command(cmd):
+        return str(out_file)
+    return ""
 
 def run_pipeline(domain: str):
     """지정된 도메인에 대해 전체 외부망 스캔 파이프라인을 실행합니다."""
-    print(f"=== Starting External ASM Pipeline for {domain} ===")
+    logger.info(f"=== Starting External ASM Pipeline for {domain} ===")
     
     subs_file = run_subfinder(domain)
-    
-    if not os.path.exists(subs_file) or os.path.getsize(subs_file) == 0:
-        print("[-] 서브도메인을 발견하지 못했습니다. 파이프라인 종료.")
+    if not subs_file or not os.path.exists(subs_file) or os.path.getsize(subs_file) == 0:
+        logger.warning("[-] No subdomains found. Terminating pipeline.")
         return
 
     dnsx_file = run_dnsx(subs_file, domain)
+    if not dnsx_file:
+        logger.error("[-] DNS resolution failed. Terminating pipeline.")
+        return
     
-    # DNSX 결과에서 라이브 IP만 추출
     live_ips_file = OUTPUT_DIR / f"{domain}_live_ips.txt"
     with open(dnsx_file, 'r') as f_in, open(live_ips_file, 'w') as f_out:
         for line in f_in:
             if not line.strip(): continue
             try:
                 data = json.loads(line)
-                if 'a' in data: # IP(A 레코드)가 있는 경우
+                if 'a' in data:
                     for ip in data['a']:
                         f_out.write(ip + '\n')
             except Exception:
@@ -91,8 +123,8 @@ def run_pipeline(domain: str):
 
     if os.path.exists(live_ips_file) and os.path.getsize(live_ips_file) > 0:
         ports_file = run_naabu(str(live_ips_file), domain)
+        if not ports_file: return
         
-        # Naabu 결과에서 ip:port 추출
         hostport_file = OUTPUT_DIR / f"{domain}_hostports.txt"
         with open(ports_file, 'r') as f_in, open(hostport_file, 'w') as f_out:
             for line in f_in:
@@ -105,9 +137,19 @@ def run_pipeline(domain: str):
         
         if os.path.exists(hostport_file) and os.path.getsize(hostport_file) > 0:
             httpx_file = run_httpx(str(hostport_file), domain)
-            vuln_file = run_nuclei_external(httpx_file, domain)
-            print(f"=== Pipeline Completed. Vulnerabilities saved to {vuln_file} ===")
+            if httpx_file:
+                # [자동화] 자산 파싱 및 DB 적재
+                parse_httpx_results(httpx_file, domain)
+                
+                vuln_file = run_nuclei_external(httpx_file, domain)
+                if vuln_file:
+                    # [자동화] 취약점 파싱 및 DB 적재
+                    parse_nuclei_results(vuln_file)
+                    logger.info(f"=== Pipeline Completed for {domain} ===")
 
 if __name__ == "__main__":
-    # Test Run
-    run_pipeline("example.com")
+    parser = argparse.ArgumentParser(description="External ASM Scanner Engine")
+    parser.add_argument("domain", help="Target domain to scan")
+    args = parser.parse_args()
+    
+    run_pipeline(args.domain)

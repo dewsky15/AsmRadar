@@ -8,15 +8,22 @@ from app.database.models import Vulnerability, Port, IPAddress
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def parse_nuclei_results(file_path: str):
+def parse_nuclei_results(file_path: str, db: Session = None):
     """
     Nuclei 스캔 JSONL 결과를 읽어 취약점(Vulnerability) 테이블에 적재합니다.
     """
-    logger.info(f"파싱 시작: Nuclei 결과 파일 [{file_path}]")
+    logger.info(f"[*] Starting vulnerability parsing: [{file_path}]")
     
-    db: Session = SessionLocal()
+    should_close = False
+    if db is None:
+        db = SessionLocal()
+        should_close = True
     
     try:
+        if not os.path.exists(file_path):
+            logger.warning(f"[-] Nuclei result file not found: {file_path}")
+            return
+
         with open(file_path, "r") as f:
             for line in f:
                 if not line.strip(): continue
@@ -29,7 +36,7 @@ def parse_nuclei_results(file_path: str):
                 host = data.get("host", "")  # IP or domain
                 port_num = 0
                 
-                # "https://example.com:8443/xxx" 형태 등에서 도메인 및 포트 추출 로직 (단순화 버전)
+                # 도메인 및 포트 추출 로직
                 if ":" in host and not host.startswith("http"):
                     parts = host.split(":")
                     host_ip = parts[0]
@@ -50,8 +57,8 @@ def parse_nuclei_results(file_path: str):
                 if ip_obj and port_num > 0:
                     port_obj = db.query(Port).filter(Port.ip_id == ip_obj.id, Port.port_number == port_num).first()
                 
-                # DB에 자산 정보가 없더라도 (연결이 끊기더라도) 일단 취약점 자체는 남기도록 구성
-                vuln_name = data.get("info", {}).get("name", "Unknown Vulnerability")
+                vuln_name = data.get("template-id", "unknown-id")
+                friendly_name = data.get("info", {}).get("name", "Unknown Vulnerability")
                 severity = data.get("info", {}).get("severity", "info")
                 desc = data.get("info", {}).get("description", "")
                 
@@ -77,13 +84,15 @@ def parse_nuclei_results(file_path: str):
                 db.add(new_vuln)
                 
         db.commit()
-        logger.info("[+] 취약점(Nuclei) 파싱 및 DB 적재 완료.")
+        logger.info("[+] Vulnerability parsing completed.")
         
     except Exception as e:
-        logger.error(f"[-] 취약점 적재 중 오류 발생: {e}")
+        logger.error(f"[-] Error during vulnerability ingestion: {e}")
         db.rollback()
+        raise e
     finally:
-        db.close()
+        if should_close:
+            db.close()
 
 if __name__ == "__main__":
     pass

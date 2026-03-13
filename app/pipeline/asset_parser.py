@@ -8,15 +8,28 @@ from app.database.models import Domain, Subdomain, IPAddress, Port
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def parse_httpx_results(file_path: str, domain_name: str):
+def is_valid_ip(address: str) -> bool:
+    """IP 주소 형식인지 확인합니다."""
+    import re
+    ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    return bool(re.match(ip_pattern, address.strip()))
+
+def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is_internal: bool = False):
     """
     httpx 출력 결과를 읽어 Domain -> Subdomain -> IP -> Port 구조로 DB에 적재합니다.
     """
-    logger.info(f"파싱 시작: httpx 결과 파일 [{file_path}]")
+    logger.info(f"[*] Starting asset parsing: [{file_path}] for [{domain_name}] (internal={is_internal})")
     
-    db: Session = SessionLocal()
+    should_close = False
+    if db is None:
+        db = SessionLocal()
+        should_close = True
     
     try:
+        if not os.path.exists(file_path):
+            logger.warning(f"[-] httpx result file not found: {file_path}")
+            return
+
         # 1. 대상 도메인 확보/생성
         domain_obj = db.query(Domain).filter(Domain.name == domain_name).first()
         if not domain_obj:
@@ -34,11 +47,11 @@ def parse_httpx_results(file_path: str, domain_name: str):
                 except json.JSONDecodeError:
                     continue
                     
-                target_host = data.get("host", "")  # ex) admin.example.com
+                target_host = data.get("host", "").strip()
                 
                 # 2. Subdomain 생성 (IP 형태가 아니라면 서브도메인으로 취급)
                 subdomain_obj = None
-                if target_host and not target_host.replace(".", "").isdigit():
+                if target_host and not is_valid_ip(target_host):
                     subdomain_obj = db.query(Subdomain).filter(Subdomain.name == target_host).first()
                     if not subdomain_obj:
                         subdomain_obj = Subdomain(name=target_host, domain_id=domain_obj.id)
@@ -46,12 +59,12 @@ def parse_httpx_results(file_path: str, domain_name: str):
                         db.commit()
                         db.refresh(subdomain_obj)
                 
-                # 3. IP 확인 및 생성 (httpx가 IP를 제공하는 경우 'a' 레코드 배열 참조)
+                # 3. IP 확인 및 생성
                 ip_str = ""
                 a_records = data.get("a", [])
                 if a_records:
                     ip_str = a_records[0]
-                elif target_host.replace(".", "").isdigit():
+                elif is_valid_ip(target_host):
                     ip_str = target_host
 
                 ip_obj = None
@@ -61,7 +74,7 @@ def parse_httpx_results(file_path: str, domain_name: str):
                         ip_obj = IPAddress(
                             address=ip_str, 
                             subdomain_id=subdomain_obj.id if subdomain_obj else None,
-                            is_internal=False  # External 파서 기준
+                            is_internal=is_internal
                         )
                         db.add(ip_obj)
                         db.commit()
@@ -78,7 +91,8 @@ def parse_httpx_results(file_path: str, domain_name: str):
                         "status_code": data.get("status_code", 0),
                         "tech": data.get("tech", []),
                         "cdn": data.get("cdn", False),
-                        "server": data.get("webserver", "")
+                        "server": data.get("webserver", ""),
+                        "last_scanned": data.get("timestamp", "")
                     }
                     
                     if not port_obj:
@@ -91,19 +105,18 @@ def parse_httpx_results(file_path: str, domain_name: str):
                         )
                         db.add(port_obj)
                     else:
-                        # 기존 자산 업데이트 (최신 상태 갱신)
                         port_obj.metadata_info = metadata
                     
         db.commit()
-        logger.info("[+] 웹 자산(httpx) 파싱 및 DB 적재 완료.")
+        logger.info(f"[+] Asset parsing completed for {domain_name}")
         
     except Exception as e:
-        logger.error(f"[-] DB 적재 중 오류 발생: {e}")
+        logger.error(f"[-] Error during DB ingestion: {e}")
         db.rollback()
+        raise e
     finally:
-        db.close()
+        if should_close:
+            db.close()
 
 if __name__ == "__main__":
-    # Test
-    # parse_httpx_results("/app/outputs/external/example.com_httpx.json", "example.com")
     pass

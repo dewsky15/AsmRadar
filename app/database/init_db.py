@@ -7,12 +7,12 @@ from app.database.models import Base
 
 # 컨테이너 환경변수에서 로드, 기본값은 localhost (Host Network 기반 스캐너 동작 시)
 DB_USER = os.getenv("DB_USER", "asm_user")
-DB_PASS = os.getenv("DB_PASS", "asm_password_secure")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "asm_password_secure")
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "asm_db")
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
