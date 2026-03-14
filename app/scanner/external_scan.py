@@ -35,13 +35,26 @@ def run_command(cmd, shell=False):
         return False
 
 def run_subfinder(domain: str) -> str:
-    """도메인을 받아 서브도메인을 탐지합니다."""
+    """도메인을 받아 서브도메인을 탐지합니다. 
+    결과가 없더라도 입력된 도메인 자체는 항상 포함시킵니다."""
     logger.info(f"[*] Running Subfinder for {domain}...")
     out_file = OUTPUT_DIR / f"{domain}_subdomains.txt"
+    
+    # 1. Subfinder 실행
     cmd = ["subfinder", "-d", domain, "-silent", "-o", str(out_file)]
-    if run_command(cmd):
-        return str(out_file)
-    return ""
+    run_command(cmd)
+    
+    # 2. 결과 파일에 입력 도메인 자체가 없으면 추가 (최소 1개 자산 보장)
+    existing_subs = set()
+    if out_file.exists():
+        with open(out_file, "r") as f:
+            existing_subs = {line.strip() for line in f if line.strip()}
+    
+    if domain not in existing_subs:
+        with open(out_file, "a") as f:
+            f.write(domain + "\n")
+            
+    return str(out_file)
 
 def run_dnsx(subdomains_file: str, domain: str) -> str:
     """서브도메인의 살아있는 IP를 해석합니다."""
@@ -99,16 +112,19 @@ def run_pipeline(domain: str):
     """지정된 도메인에 대해 전체 외부망 스캔 파이프라인을 실행합니다."""
     logger.info(f"=== Starting External ASM Pipeline for {domain} ===")
     
+    # 1. 서브도메인 탐지
     subs_file = run_subfinder(domain)
     if not subs_file or not os.path.exists(subs_file) or os.path.getsize(subs_file) == 0:
-        logger.warning("[-] No subdomains found. Terminating pipeline.")
+        logger.error("[-] Subdomain collection failed unexpectedly.")
         return
 
+    # 2. DNS 해석
     dnsx_file = run_dnsx(subs_file, domain)
-    if not dnsx_file:
-        logger.error("[-] DNS resolution failed. Terminating pipeline.")
+    if not dnsx_file or not os.path.exists(dnsx_file) or os.path.getsize(dnsx_file) == 0:
+        logger.error("[-] DNS resolution failed or no live hosts found.")
         return
     
+    # Live IP 추출
     live_ips_file = OUTPUT_DIR / f"{domain}_live_ips.txt"
     with open(dnsx_file, 'r') as f_in, open(live_ips_file, 'w') as f_out:
         for line in f_in:
@@ -121,10 +137,14 @@ def run_pipeline(domain: str):
             except Exception:
                 pass
 
+    # 3. 포트 스캔
     if os.path.exists(live_ips_file) and os.path.getsize(live_ips_file) > 0:
         ports_file = run_naabu(str(live_ips_file), domain)
-        if not ports_file: return
+        if not ports_file or not os.path.exists(ports_file) or os.path.getsize(ports_file) == 0:
+            logger.warning("[-] No open ports found by Naabu.")
+            return
         
+        # IP:Port 리스트 생성
         hostport_file = OUTPUT_DIR / f"{domain}_hostports.txt"
         with open(ports_file, 'r') as f_in, open(hostport_file, 'w') as f_out:
             for line in f_in:
@@ -135,17 +155,27 @@ def run_pipeline(domain: str):
                 except Exception:
                     pass
         
+        # 4. 웹 프로파일링
         if os.path.exists(hostport_file) and os.path.getsize(hostport_file) > 0:
             httpx_file = run_httpx(str(hostport_file), domain)
-            if httpx_file:
+            if httpx_file and os.path.exists(httpx_file) and os.path.getsize(httpx_file) > 0:
                 # [자동화] 자산 파싱 및 DB 적재
+                logger.info("[*] Ingesting HTTPX results into database...")
                 parse_httpx_results(httpx_file, domain)
                 
+                # 5. 취약점 스캔
                 vuln_file = run_nuclei_external(httpx_file, domain)
-                if vuln_file:
+                if vuln_file and os.path.exists(vuln_file) and os.path.getsize(vuln_file) > 0:
                     # [자동화] 취약점 파싱 및 DB 적재
+                    logger.info("[*] Ingesting Nuclei results into database...")
                     parse_nuclei_results(vuln_file)
                     logger.info(f"=== Pipeline Completed for {domain} ===")
+                else:
+                    logger.info(f"[-] No vulnerabilities found for {domain} (or Nuclei failed)")
+            else:
+                logger.warning("[-] No web services identified by httpx.")
+    else:
+        logger.warning("[-] No live IPs to scan ports.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="External ASM Scanner Engine")
