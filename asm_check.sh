@@ -51,7 +51,7 @@ if [ "$(docker ps -q -f name=asm_scanner)" ]; then
     check_tool "Naabu" "naabu -version"
     check_tool "HTTPx" "httpx -version"
     check_tool "Nuclei" "nuclei -version"
-    check_tool "Masscan" "masscan -V"
+    check_tool "Masscan" "command -v masscan"
     check_tool "Nmap" "nmap --version"
 else
     echo -e "${RED} [!] asm_scanner 컨테이너가 꺼져 있어 도구 검사를 건너뜁니다.${NC}"
