@@ -140,20 +140,29 @@ def run_pipeline(domain: str):
     # 3. 포트 스캔
     if os.path.exists(live_ips_file) and os.path.getsize(live_ips_file) > 0:
         ports_file = run_naabu(str(live_ips_file), domain)
-        if not ports_file or not os.path.exists(ports_file) or os.path.getsize(ports_file) == 0:
-            logger.warning("[-] No open ports found by Naabu.")
-            return
         
-        # IP:Port 리스트 생성
+        # [Fallback] Naabu가 포트를 못 찾은 경우, 기본 웹 포트(80, 443) 강제 추가
         hostport_file = OUTPUT_DIR / f"{domain}_hostports.txt"
-        with open(ports_file, 'r') as f_in, open(hostport_file, 'w') as f_out:
-            for line in f_in:
-                if not line.strip(): continue
-                try:
-                    data = json.loads(line)
-                    f_out.write(f"{data['host']}:{data['port']}\n")
-                except Exception:
-                    pass
+        
+        if not ports_file or not os.path.exists(ports_file) or os.path.getsize(ports_file) == 0:
+            logger.warning("[-] No open ports found by Naabu. Applying fallback (80, 443)...")
+            with open(live_ips_file, 'r') as f_in, open(hostport_file, 'w') as f_out:
+                for line in f_in:
+                    ip = line.strip()
+                    if ip:
+                        f_out.write(f"{ip}:80\n")
+                        f_out.write(f"{ip}:443\n")
+        else:
+            # Naabu 결과가 있는 경우 정상 파싱
+            logger.info(f"[+] Naabu found open ports. Generating hostports list...")
+            with open(ports_file, 'r') as f_in, open(hostport_file, 'w') as f_out:
+                for line in f_in:
+                    if not line.strip(): continue
+                    try:
+                        data = json.loads(line)
+                        f_out.write(f"{data['host']}:{data['port']}\n")
+                    except Exception:
+                        pass
         
         # 4. 웹 프로파일링
         if os.path.exists(hostport_file) and os.path.getsize(hostport_file) > 0:
