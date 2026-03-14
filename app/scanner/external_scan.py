@@ -36,12 +36,12 @@ def run_command(cmd, shell=False):
 
 def run_subfinder(domain: str) -> str:
     """도메인을 받아 서브도메인을 탐지합니다. 
-    결과가 없더라도 입력된 도메인 자체는 항상 포함시킵니다."""
+    네트워크 부하 방지를 위해 스레드를 제한합니다."""
     logger.info(f"[*] Running Subfinder for {domain}...")
     out_file = OUTPUT_DIR / f"{domain}_subdomains.txt"
     
-    # 1. Subfinder 실행
-    cmd = ["subfinder", "-d", domain, "-silent", "-o", str(out_file)]
+    # 1. Subfinder 실행 (네트워크 안정성을 위해 스레드 제한)
+    cmd = ["subfinder", "-d", domain, "-silent", "-t", "10", "-o", str(out_file)]
     run_command(cmd)
     
     # 2. 결과 파일에 입력 도메인 자체가 없으면 추가 (최소 1개 자산 보장)
@@ -57,10 +57,11 @@ def run_subfinder(domain: str) -> str:
     return str(out_file)
 
 def run_dnsx(subdomains_file: str, domain: str) -> str:
-    """서브도메인의 살아있는 IP를 해석합니다."""
+    """서브도메인의 살아있는 IP를 해석합니다. DNS 플러딩 방지를 위해 속도를 제한합니다."""
     logger.info("[*] Running dnsx for DNS resolution...")
     out_file = OUTPUT_DIR / f"{domain}_dnsx.json"
-    cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -o {out_file}"
+    # -rl 50: 초당 50개 쿼리로 제한하여 호스트 DNS 부하 최소화
+    cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -rl 50 -o {out_file}"
     if run_command(cmd, shell=True):
         return str(out_file)
     return ""
@@ -78,7 +79,8 @@ def run_httpx(port_list_file: str, domain: str) -> str:
     """열린 포트에 대해 웹 서비스를 프로파일링 합니다."""
     logger.info("[*] Running httpx for web profiling...")
     out_file = OUTPUT_DIR / f"{domain}_httpx.json"
-    cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-json", "-o", str(out_file)]
+    # -t 20: 동시 연결 수를 제한하여 안정성 확보
+    cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-t", "20", "-json", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""
@@ -110,7 +112,10 @@ def run_nuclei_external(httpx_out_file: str, domain: str) -> str:
 
 def run_pipeline(domain: str):
     """지정된 도메인에 대해 전체 외부망 스캔 파이프라인을 실행합니다."""
-    logger.info(f"=== Starting External ASM Pipeline for {domain} ===")
+    logger.info(f"===================================================")
+    logger.info(f" [ ASM Platform Pipeline v1.1 - Fallback Ready ]")
+    logger.info(f" Target: {domain}")
+    logger.info(f"===================================================")
     
     # 1. 서브도메인 탐지
     subs_file = run_subfinder(domain)
