@@ -24,5 +24,11 @@ target-version = "py312"
 select = ["E", "F", "I", "N", "UP", "B"]
 ignore = []
 
-[tool.setuptools.packages.find]
-include = ["app*"]
+[tool.setuptools]
+packages = [
+    "app",
+    "app.database",
+    "app.pipeline",
+    "app.scanner",
+    "app.scheduler"
+]
