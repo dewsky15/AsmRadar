@@ -12,9 +12,13 @@ def print_banner():
     """
     print(banner)
 
-def run_in_container(command: str):
-    """docker exec를 통해 asm_scanner 컨테이너 내부에서 명령어를 실행합니다."""
-    docker_cmd = ["docker", "exec", "-t", "asm_scanner", "bash", "-c", command]
+def run_in_container(cmd_args: list):
+    """docker exec를 통해 asm_scanner 컨테이너 내부에서 명령어를 실행합니다.
+    
+    셸 메타문자로 인한 커맨드 인젝션을 방지하기 위해,
+    bash -c를 거치지 않고 인수 리스트를 직접 전달합니다.
+    """
+    docker_cmd = ["docker", "exec", "-t", "asm_scanner"] + cmd_args
     try:
         # 실시간 출력 표출
         process = subprocess.Popen(docker_cmd, stdout=sys.stdout, stderr=sys.stderr)
@@ -37,13 +41,10 @@ def main():
     print("[*] Dispatching job to 'asm_scanner' container...\n")
     
     if args.mode == "external":
-        # 컨테이너 내부에 작성해둔 파이썬 엔진 호출 (타겟 동적 주입)
-        cmd = f"python3 /app/app/scanner/external_scan.py {args.target}" 
-        run_in_container(cmd)
+        run_in_container(["python3", "/app/app/scanner/external_scan.py", args.target])
         
     elif args.mode == "internal":
-        cmd = f"python3 /app/app/scanner/internal_scan.py {args.target}"
-        run_in_container(cmd)
+        run_in_container(["python3", "/app/app/scanner/internal_scan.py", args.target])
 
 if __name__ == "__main__":
     main()

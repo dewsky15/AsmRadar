@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import argparse
@@ -95,7 +96,6 @@ def run_internal_nuclei(httpx_out_file: str, prefix: str) -> str:
     
     # httpx JSON에서 URL 추출
     try:
-        import json
         with open(httpx_out_file, 'r') as f_in, open(target_urls, 'w') as f_out:
             for line in f_in:
                 if not line.strip(): continue

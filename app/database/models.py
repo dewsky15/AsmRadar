@@ -35,7 +35,7 @@ class IPAddress(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True)
     subdomain_id: Mapped[int | None] = mapped_column(ForeignKey("subdomains.id"), nullable=True) # Internal ASM의 경우 Subdomain이 없을 수 있음
-    address: Mapped[str] = mapped_column(String(45), index=True) # IPv4 or IPv6
+    address: Mapped[str] = mapped_column(String(45), index=True, unique=True)  # IPv4 or IPv6, 중복 삽입 방지
     is_internal: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
