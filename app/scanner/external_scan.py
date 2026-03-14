@@ -40,8 +40,8 @@ def run_subfinder(domain: str) -> str:
     logger.info(f"[*] Running Subfinder for {domain}...")
     out_file = OUTPUT_DIR / f"{domain}_subdomains.txt"
     
-    # 1. Subfinder 실행 (네트워크 안정성을 위해 스레드 제한)
-    cmd = ["subfinder", "-d", domain, "-silent", "-t", "10", "-o", str(out_file)]
+    # 1. Subfinder 실행 (네트워크 안정성을 위해 스레드 더 축소)
+    cmd = ["subfinder", "-d", domain, "-silent", "-t", "5", "-o", str(out_file)]
     run_command(cmd)
     
     # 2. 결과 파일에 입력 도메인 자체가 없으면 추가 (최소 1개 자산 보장)
@@ -60,8 +60,8 @@ def run_dnsx(subdomains_file: str, domain: str) -> str:
     """서브도메인의 살아있는 IP를 해석합니다. DNS 플러딩 방지를 위해 속도를 제한합니다."""
     logger.info("[*] Running dnsx for DNS resolution...")
     out_file = OUTPUT_DIR / f"{domain}_dnsx.json"
-    # -rl 50: 초당 50개 쿼리로 제한하여 호스트 DNS 부하 최소화
-    cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -rl 50 -o {out_file}"
+    # -rl 20: 초당 20개 쿼리로 추가 하향 조정 (DNS 안정성 최우선)
+    cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -rl 20 -o {out_file}"
     if run_command(cmd, shell=True):
         return str(out_file)
     return ""
@@ -79,8 +79,8 @@ def run_httpx(port_list_file: str, domain: str) -> str:
     """열린 포트에 대해 웹 서비스를 프로파일링 합니다."""
     logger.info("[*] Running httpx for web profiling...")
     out_file = OUTPUT_DIR / f"{domain}_httpx.json"
-    # -t 20: 동시 연결 수를 제한하여 안정성 확보
-    cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-t", "20", "-json", "-o", str(out_file)]
+    # -t 10: 동시 연결 수를 10개로 제한하여 소켓 고갈 방지
+    cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-t", "10", "-json", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""

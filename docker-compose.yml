@@ -8,26 +8,33 @@ services:
   # ==========================================
   # 1. Scanner Node (Phase 1 & 2)
   # ==========================================
+  # ==========================================
+  # 1. Scanner Node (Phase 1 & 2)
+  # ==========================================
   scanner-node:
     build: 
       context: .
       dockerfile: docker/Dockerfile.scanner
     container_name: asm_scanner
-    # [핵심] 스캐너는 호스트(Ubuntu)의 물리 네트워크 인터페이스를 직접 사용하여 패킷을 전송함
-    network_mode: "host"
+    # [격리] 안정성을 위해 호스트 네트워크 대신 브리지 네트워크 사용
+    # network_mode: "host" (제거됨)
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
-      # 호스트 네트워크를 쓰기 때문에, DB 접근 시 localhost가 호스트를 의미함
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
+      # 서비스 이름을 사용하여 내부망으로 DB 접근
+      - DB_HOST=db
+      - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://redis:6379/0
       - TZ=${TZ}
     volumes:
-      # 로컬 머신의 ./data/outputs 디렉토리와 컨테이너 결과물 동기화
       - ./data/outputs:/app/outputs:rw
-    # 데몬 형태로 계속 띄워두고, 주기적으로 Celery/Cron이 스캔 명령을 내리도록 함
+    depends_on:
+      db:
+        condition: service_healthy
     command: tail -f /dev/null
 
   # ==========================================
@@ -47,6 +54,11 @@ services:
       - "127.0.0.1:${HOST_DB_PORT}:5432"
     volumes:
       - asm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     logging:
       driver: "json-file"
       options:
