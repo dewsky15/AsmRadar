@@ -33,3 +33,8 @@ RUN nuclei -ut
 
 WORKDIR /app
 COPY . /app/
+
+# pyproject.toml 기반으로 Python 의존성 설치
+# --break-system-packages: Ubuntu 24.04의 PEP 668 제한 우회 (컨테이너 전용)
+# -e .: 프로젝트를 editable 모드로 설치 → `from app.xxx import ...` 경로 정상 동작
+RUN pip3 install --break-system-packages -e .
