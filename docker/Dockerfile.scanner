@@ -35,7 +35,9 @@ COPY . /app/
 # --break-system-packages: Ubuntu 24.04의 PEP 668 제한 우회
 # -e .: 프로젝트를 editable 모드로 설치 (app 패키지 인식용)
 # [중요] 소스 코드 복사(COPY) 후에 실행해야 setuptools가 모든 의존성을 정확히 파악하여 설치함
-RUN pip3 install --break-system-packages --upgrade pip setuptools wheel && \
+# pip 자체를 업그레이드하려 하면 Debian 패키지 관리자와 충돌할 수 있으므로, 
+# setuptools와 wheel만 안전하게 업데이트하여 설치를 진행합니다.
+RUN pip3 install --break-system-packages --ignore-installed setuptools wheel && \
     pip3 install --break-system-packages -e .
 
 # Nuclei 템플릿 업데이트
