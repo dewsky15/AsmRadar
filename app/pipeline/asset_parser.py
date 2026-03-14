@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from sqlalchemy.orm import Session
 
 from app.database.init_db import SessionLocal

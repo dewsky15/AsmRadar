@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.database.init_db import SessionLocal
@@ -43,10 +45,9 @@ def parse_nuclei_results(file_path: str, db: Session = None):
                     if parts[1].isdigit():
                         port_num = int(parts[1])
                 elif host.startswith("http"):
-                    from urllib.parse import urlparse
                     parsed = urlparse(host)
                     host_ip = parsed.hostname
-                    port_num = parsed.port if parsed.port else (443 if parsed.scheme == "https" else 80)
+                    port_num = parsed.port or (443 if parsed.scheme == "https" else 80)
                 else:
                     host_ip = host
                 
