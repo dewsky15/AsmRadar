@@ -25,14 +25,33 @@ OUTPUT_DIR = Path("/app/outputs/internal")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def run_command(cmd, shell=False):
-    """서브프로세스를 실행하고 리턴 코드를 체크합니다."""
+    """서브프로세스를 실행하고 실시간으로 표준 출력을 표출합니다."""
     try:
-        # masscan 등은 root 권한이나 특수 권한이 필요하므로 stderr를 잘 봐야 함
-        result = subprocess.run(cmd, shell=shell, check=True, capture_output=True, text=True)
+        if shell and isinstance(cmd, list):
+            cmd = " ".join(cmd)
+            
+        process = subprocess.Popen(
+            cmd, 
+            shell=shell, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        for line in process.stdout:
+            print(line, end='', flush=True)
+            
+        process.wait()
+        
+        if process.returncode != 0:
+            logger.error(f"[-] Command failed with return code {process.returncode}")
+            return False
+            
         return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"[-] Command failed: {e.cmd}")
-        logger.error(f"[-] Error output: {e.stderr}")
+    except Exception as e:
+        logger.error(f"[-] Error executing command: {e}")
         return False
 
 def run_masscan(cidr: str, prefix: str) -> str:

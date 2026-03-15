@@ -25,13 +25,33 @@ OUTPUT_DIR = Path("/app/outputs/external")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def run_command(cmd, shell=False):
-    """서브프로세스를 실행하고 리턴 코드를 체크합니다."""
+    """서브프로세스를 실행하고 실시간으로 표준 출력을 표출합니다."""
     try:
-        result = subprocess.run(cmd, shell=shell, check=True, capture_output=True, text=True)
+        if shell and isinstance(cmd, list):
+            cmd = " ".join(cmd)
+            
+        process = subprocess.Popen(
+            cmd, 
+            shell=shell, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        for line in process.stdout:
+            print(line, end='', flush=True)
+            
+        process.wait()
+        
+        if process.returncode != 0:
+            logger.error(f"[-] Command failed with return code {process.returncode}")
+            return False
+            
         return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"[-] Command failed: {e.cmd}")
-        logger.error(f"[-] Error output: {e.stderr}")
+    except Exception as e:
+        logger.error(f"[-] Error executing command: {e}")
         return False
 
 def run_subfinder(domain: str) -> str:
@@ -70,7 +90,7 @@ def run_naabu(ip_list_file: str, domain: str) -> str:
     """IP 리스트 기반 포트 스캐닝을 수행합니다."""
     logger.info("[*] Running Naabu for port scanning...")
     out_file = OUTPUT_DIR / f"{domain}_ports.json"
-    cmd = ["naabu", "-l", ip_list_file, "-top-ports", "100", "-silent", "-json", "-o", str(out_file)]
+    cmd = ["naabu", "-l", ip_list_file, "-top-ports", "100", "-rate", "1000", "-silent", "-json", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""

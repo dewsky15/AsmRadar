@@ -5,15 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.database.init_db import SessionLocal
 from app.database.models import Domain, Subdomain, IPAddress, Port
+from app.utils.validators import is_valid_ip
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def is_valid_ip(address: str) -> bool:
-    """IP 주소 형식인지 확인합니다."""
-    import re
-    ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-    return bool(re.match(ip_pattern, address.strip()))
 
 def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is_internal: bool = False):
     """
@@ -36,8 +32,7 @@ def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is
         if not domain_obj:
             domain_obj = Domain(name=domain_name, source="httpx")
             db.add(domain_obj)
-            db.commit()
-            db.refresh(domain_obj)
+            db.flush() # ID 생성을 위해 flush
             
         with open(file_path, "r") as f:
             for line in f:
@@ -57,8 +52,7 @@ def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is
                     if not subdomain_obj:
                         subdomain_obj = Subdomain(name=target_host, domain_id=domain_obj.id)
                         db.add(subdomain_obj)
-                        db.commit()
-                        db.refresh(subdomain_obj)
+                        db.flush()
                 
                 # 3. IP 확인 및 생성
                 ip_str = ""
@@ -78,8 +72,7 @@ def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is
                             is_internal=is_internal
                         )
                         db.add(ip_obj)
-                        db.commit()
-                        db.refresh(ip_obj)
+                        db.flush()
 
                 # 4. Port 및 웹 기술 메타데이터 저장
                 port_num = int(data.get("port", 80))
@@ -108,6 +101,7 @@ def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is
                     else:
                         port_obj.metadata_info = metadata
                     
+        db.commit()
         db.commit()
         logger.info(f"[+] Asset parsing completed for {domain_name}")
         

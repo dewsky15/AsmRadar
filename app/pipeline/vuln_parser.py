@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database.init_db import SessionLocal
 from app.database.models import Vulnerability, Port, IPAddress
+from app.utils.validators import is_valid_ip
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ def parse_nuclei_results(file_path: str, db: Session = None):
                 )
                 db.add(new_vuln)
                 
+        # 루프 종료 후 한 번에 커밋
         db.commit()
         logger.info("[+] Vulnerability parsing completed.")
         
