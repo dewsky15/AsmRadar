@@ -102,7 +102,6 @@ def parse_httpx_results(file_path: str, domain_name: str, db: Session = None, is
                         port_obj.metadata_info = metadata
                     
         db.commit()
-        db.commit()
         logger.info(f"[+] Asset parsing completed for {domain_name}")
         
     except Exception as e:
