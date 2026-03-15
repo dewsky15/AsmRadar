@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = Path("/app/outputs/external")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def run_command(cmd, shell=False):
-    """서브프로세스를 실행하고 실시간으로 표준 출력을 표출합니다."""
+def run_command(cmd, shell=False, timeout=None):
+    """서브프로세스를 실행하고 실시간으로 표준 출력을 표출합니다. 타임아웃을 지원합니다."""
     try:
         if shell and isinstance(cmd, list):
             cmd = " ".join(cmd)
@@ -40,11 +40,17 @@ def run_command(cmd, shell=False):
             universal_newlines=True
         )
         
-        for line in process.stdout:
-            print(line, end='', flush=True)
+        # 실시간 출력 및 타임아웃 처리
+        try:
+            for line in process.stdout:
+                print(line, end='', flush=True)
             
-        process.wait()
-        
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            logger.error(f"[-] Command timed out after {timeout} seconds: {cmd}")
+            return False
+            
         if process.returncode != 0:
             logger.error(f"[-] Command failed with return code {process.returncode}")
             return False
@@ -60,9 +66,9 @@ def run_subfinder(domain: str) -> str:
     logger.info(f"[*] Running Subfinder for {domain}...")
     out_file = OUTPUT_DIR / f"{domain}_subdomains.txt"
     
-    # 1. Subfinder 실행 (네트워크 안정성을 위해 스레드 더 축소)
+    # 1. Subfinder 실행 (네트워크 안정성을 위해 스레드 더 축소, 타임아웃 5분)
     cmd = ["subfinder", "-d", domain, "-silent", "-t", "5", "-o", str(out_file)]
-    run_command(cmd)
+    run_command(cmd, timeout=300)
     
     # 2. 결과 파일에 입력 도메인 자체가 없으면 추가 (최소 1개 자산 보장)
     existing_subs = set()
@@ -80,9 +86,9 @@ def run_dnsx(subdomains_file: str, domain: str) -> str:
     """서브도메인의 살아있는 IP를 해석합니다. DNS 플러딩 방지를 위해 속도를 제한합니다."""
     logger.info("[*] Running dnsx for DNS resolution...")
     out_file = OUTPUT_DIR / f"{domain}_dnsx.json"
-    # -rl 20: 초당 20개 쿼리로 추가 하향 조정 (DNS 안정성 최우선)
+    # -rl 20: 초당 20개 쿼리로 추가 하향 조정 (DNS 안정성 최우선, 타임아웃 5분)
     cmd = f"cat {subdomains_file} | dnsx -silent -a -cname -j -rl 20 -o {out_file}"
-    if run_command(cmd, shell=True):
+    if run_command(cmd, shell=True, timeout=300):
         return str(out_file)
     return ""
 
@@ -91,7 +97,7 @@ def run_naabu(ip_list_file: str, domain: str) -> str:
     logger.info("[*] Running Naabu for port scanning...")
     out_file = OUTPUT_DIR / f"{domain}_ports.json"
     cmd = ["naabu", "-l", ip_list_file, "-top-ports", "100", "-rate", "1000", "-silent", "-json", "-o", str(out_file)]
-    if run_command(cmd):
+    if run_command(cmd, timeout=600): # 타임아웃 10분
         return str(out_file)
     return ""
 
@@ -99,9 +105,9 @@ def run_httpx(port_list_file: str, domain: str) -> str:
     """열린 포트에 대해 웹 서비스를 프로파일링 합니다."""
     logger.info("[*] Running httpx for web profiling...")
     out_file = OUTPUT_DIR / f"{domain}_httpx.json"
-    # -t 10: 동시 연결 수를 10개로 제한하여 소켓 고갈 방지
+    # -t 10: 동시 연결 수를 10개로 제한하여 소켓 고갈 방지 (타임아웃 10분)
     cmd = ["httpx", "-l", port_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-t", "10", "-json", "-o", str(out_file)]
-    if run_command(cmd):
+    if run_command(cmd, timeout=600):
         return str(out_file)
     return ""
 
@@ -126,7 +132,7 @@ def run_nuclei_external(httpx_out_file: str, domain: str) -> str:
         return ""
 
     cmd = ["nuclei", "-l", str(target_urls), "-tags", "cve,exposed-panel,default-login", "-severity", "critical,high", "-silent", "-jsonl", "-rl", "20", "-c", "5", "-o", str(out_file)]
-    if run_command(cmd):
+    if run_command(cmd, timeout=1800): # 타임아웃 30분
         return str(out_file)
     return ""
 
