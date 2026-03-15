@@ -105,7 +105,7 @@ def run_nuclei_external(httpx_out_file: str, domain: str) -> str:
         logger.error(f"[-] HTTPX output not found for nuclei: {httpx_out_file}")
         return ""
 
-    cmd = ["nuclei", "-l", str(target_urls), "-tags", "cve,exposed-panel,default-login", "-severity", "critical,high", "-silent", "-jsonl", "-o", str(out_file)]
+    cmd = ["nuclei", "-l", str(target_urls), "-tags", "cve,exposed-panel,default-login", "-severity", "critical,high", "-silent", "-jsonl", "-rl", "20", "-c", "5", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""

@@ -42,7 +42,7 @@ def run_masscan(cidr: str, prefix: str) -> str:
     cmd = [
         "masscan", cidr,
         "-p21,22,23,80,443,445,3389,8080,8443",
-        "--rate", "1000",
+        "--rate", "500",
         "-oG", str(out_file)
     ]
     if run_command(cmd):
@@ -83,7 +83,7 @@ def run_internal_httpx(ip_list_file: str, prefix: str) -> str:
     """내부망 내에 동작 중인 웹 관리자 페이지 등을 스니핑합니다."""
     logger.info("[*] Running httpx for internal web discovery...")
     out_file = OUTPUT_DIR / f"{prefix}_httpx.json"
-    cmd = ["httpx", "-l", ip_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-json", "-o", str(out_file)]
+    cmd = ["httpx", "-l", ip_list_file, "-title", "-tech-detect", "-status-code", "-silent", "-t", "10", "-json", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""
@@ -108,7 +108,7 @@ def run_internal_nuclei(httpx_out_file: str, prefix: str) -> str:
         logger.error(f"[-] Failed to prepare targets for internal nuclei: {e}")
         return ""
 
-    cmd = ["nuclei", "-l", str(target_urls), "-tags", "default-login,rce,misconfig,iot", "-silent", "-jsonl", "-o", str(out_file)]
+    cmd = ["nuclei", "-l", str(target_urls), "-tags", "default-login,rce,misconfig,iot", "-silent", "-jsonl", "-rl", "20", "-c", "5", "-o", str(out_file)]
     if run_command(cmd):
         return str(out_file)
     return ""

@@ -21,6 +21,9 @@ services:
     dns:
       - 8.8.8.8
       - 8.8.4.4
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       # 서비스 이름을 사용하여 내부망으로 DB 접근
       - DB_HOST=db
